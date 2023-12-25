@@ -1,0 +1,7 @@
+*egg*/
+*__pycache__*/
+*package-lock.json
+*package.json
+*dataset/
+.vscode/
+*.pyc
