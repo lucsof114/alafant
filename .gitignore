@@ -5,3 +5,4 @@
 *dataset/
 .vscode/
 *.pyc
+*node_modules/
