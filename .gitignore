@@ -1,8 +1,8 @@
 *egg*/
 *__pycache__*/
 *package-lock.json
-*package.json
 *dataset/
 .vscode/
 *.pyc
+node_modules/
 *node_modules/
