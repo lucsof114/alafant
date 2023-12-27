@@ -6,5 +6,8 @@
     "ALG": "SmartDCA",
     "DEFAULT_SLIPPAGE": 50,
     "MARKET_API_KEY": "d7c58506-119d-4c23-a43c-bcfbb9a864da",
-    "BASE_CURRENCY": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    "BASE_CURRENCY": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "TRADEABLE_ASSETS": {
+        
+    }
 }

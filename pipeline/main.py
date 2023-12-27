@@ -1,24 +1,17 @@
-# import asyncio
-# import websockets
-# import json 
-# import sys 
-# sys.path.append("/Users/lucassoffer/Documents/Develop/alafant/models")
 import requests
 import time
 from multiprocessing import Process, Queue
 import threading
 import yaml
 import json
-from pipeline.util.asset_token import ExchangeMarket, Token
-from models.template import ALG_REGISTRY, init_alg_registry
+from pipeline.core import ALFMarket, MarketFrame
+from pipeline.core.alf_alg import ALG_REGISTRY, init_alg_registry
+from datetime import datetime
+from pathlib import Path
 
 with open('config.json', 'r') as file:
     CONFIG = yaml.safe_load(file)
 
-HEADER = {
-  'Accepts': 'application/json',
-  'X-CMC_PRO_API_KEY': "d7c58506-119d-4c23-a43c-bcfbb9a864da",
-}
 
 def fetch_market_data(market_queue, tokens):
     params = "id=" + ",".join([x.cmc_id for x in tokens.values()])
@@ -27,11 +20,12 @@ def fetch_market_data(market_queue, tokens):
         try:
             start_ts = time.time()
             response = requests.get(f'https://pro-api.coinmarketcap.com/v2/cryptocurrency/quotes/latest?{params}', headers=HEADER) 
-            response = json.loads(response.text)
-            if response['status']['error_code'] != 0: 
+            market_update = json.loads(response.text)
+            # market_update = {id_map[k]: v['quote']['USD'] for k, v in response['data'].items()}
+            if market_update['status']['error_code'] != 0: 
                 continue
-            market_update = {id_map[k]: v['quote']['USD'] for k, v in response['data'].items()}
-            market_queue.put(market_update)
+            market_frame = MarketFrame.init_from_cmc(market_update)
+            market_queue.put(market_frame)
             # TODO: make this account for get time
             remaining_time = CONFIG["MARKET_UPDATE_RATE"] - (time.time() - start_ts)
             if remaining_time > 0:
@@ -41,19 +35,45 @@ def fetch_market_data(market_queue, tokens):
             print(f"Request error: {e}")
             # break
 
+def run_one_frame(market, market_frame, alg):
+    market.update_order_status()        
+    market.update_quotes(market_frame)
+    alg_frame = alg.run(market)
+    order_frame = market.send_orders()
+    return alg_frame, order_frame
 
-def main_loop(alg, market, data_queue):
+
+def main_loop(alg, market, data_queue, logging_queue):
     while True:
+        market_frame = data_queue.get() 
         if not market.is_live():
-            time.sleep(1)
+            print("Skipping market frame, bot is not alive.")
             continue
-        while not data_queue.empty():
-            market.update_pending_orders()        
-            print("RUNNING ALGS")
-            market_data = data_queue.get() 
-            market.update_quotes(market_data)
-            alg.run(market)
-        market.place_orders()
+        alg_frame, order_frame = run_one_frame(market, market_frame, alg)
+        logging_queue.put((market_frame, alg_frame, order_frame))
+
+def log_one_frame(save_dir, output_frame):
+    market_frame, alg_frame, order_frame = output_frame
+    frame_dir = save_dir / market_frame.timestamp 
+    frame_dir.mkdir(parents=True)
+    frame_path = frame_dir / 'output_frame.json'
+    with open(frame_path, 'w') as fp:
+        json.dump({
+            "market_frame": market_frame.to_dict(),
+            "alg_frame": alg_frame.to_dict(),
+            "order_frame": order_frame.to_dict(),
+        }, fp)
+
+
+def frame_logger(logging_queue):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    save_dir = Path(f"/Users/lucassoffer/Documents/Develop/alafant/dataset/live/{timestamp}")
+    save_dir.mkdir(parents=True, exist_ok=True)
+    while True:
+        output_frame = logging_queue.get()
+
+
+
 
 
 def get_tokens(): 
@@ -82,17 +102,21 @@ if __name__ == '__main__':
     
     market_queue = Queue()
     order_queue = Queue()
+    logging_queue = Queue()
 
     available_tokens = get_tokens()
-    market = ExchangeMarket(available_tokens)
+    market = ALFMarket
 
     # Create the processes
-    alg_loop = Process(target=main_loop, args=(alg, market, market_queue))
+    alg_loop = Process(target=main_loop, args=(alg, market, market_queue, logging_queue))
     alg_loop.start()
 
     # Start I/O-bound tasks in threads
     market_fetcher = threading.Thread(target=fetch_market_data, args=(market_queue, available_tokens))
     market_fetcher.start()
+
+    logging_thread = threading.Thread(target=frame_logger, args=(logging_queue))
+    logging_thread.start()
     
     # Wait for the processes to finish (in this case, they won't)
     market_fetcher.join()
