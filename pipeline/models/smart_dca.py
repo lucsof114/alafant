@@ -23,13 +23,10 @@ class SmartDCA(ALFAlgNode):
         if self.order_id is not None:
             return
         
-
+        self.set_extraction("some_var", 4)
         pyth_quote = market_frame[PYTH_ID]
-        if self.prev_ts != pyth_quote.timestamp:
-            print("PRICE: ")
-            print(pyth_quote.price)
         self.prev_ts = pyth_quote.timestamp
 
-        if pyth_quote.price > 10.355: #cents USD
-            order = ALFOrder.buy(100, PYTH_ID)
+        if pyth_quote.price > 0.34: #cents USD
+            order = ALFOrder.buy(100, pyth_quote)
             self.order_id = self.place_order(order)

@@ -6,18 +6,20 @@ with open('config.json', 'r') as file:
     CONFIG = json.load(file)
 
 class ALFOrder:
-    PENDING = 0
-    SENT = 1
+    SENT = 0
+    PENDING = 1
     COMPLETED = 2
     FAILED = 3
 
-    def __init__(self, is_buy, amount, token_id, slippageBPS=CONFIG["DEFAULT_SLIPPAGE"]):
+    def __init__(self, is_buy, amount, quote, slippageBPS=CONFIG["DEFAULT_SLIPPAGE"]):
         self.is_buy = is_buy
         self.amount = amount
         self.status = ALFOrder.PENDING
-        self.token_id = token_id
+        self.token_id = quote.token_id
         self.slippage = slippageBPS
+        self.price = quote.price
         self.id = str(uuid.uuid4())
+        self.tx_id = None
 
     @staticmethod
     def buy(amount, token_id):
@@ -29,12 +31,23 @@ class ALFOrder:
     
     def to_dict(self):
         return {
-            "inputTokenAddress": CONFIG['BASE_CURRENCY'] if self.is_buy else self.token_id,
-            "outputTokenAddress":  self.token_id if self.is_buy else CONFIG['BASE_CURRENCY'],
-            "swapAmount": self.amount,
-            "slippageBps": self.slippage,
-            "orderID": str(self.id)
+                "type": "buy" if self.is_buy else "sell",
+                "amount": self.amount,
+                "status": self.status,
+                "token_id": self.token_id,
+                "slippage": self.slippage,
+                "price": self.price,
+                "id": self.id,
+                "tx_id": self.tx_id,
         }
+    # def to_dict(self):
+    #     return {
+    #         "inputTokenAddress": CONFIG['BASE_CURRENCY'] if self.is_buy else self.token_id,
+    #         "outputTokenAddress":  self.token_id if self.is_buy else CONFIG['BASE_CURRENCY'],
+    #         "swapAmount": self.amount,
+    #         "slippageBps": self.slippage,
+    #         "orderID": str(self.id)
+    #     }
 
 class ALFMarket:
 
@@ -100,4 +113,5 @@ class ALFMarket:
             out = requests.post(f"http://localhost:3000/execute-swaps", json=meta)
             print(out.text)
         self.orders_to_send = []
+
 

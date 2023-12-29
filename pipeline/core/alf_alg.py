@@ -2,7 +2,7 @@
 import abc 
 import numpy as np
 import copy
-from pipeline.core.alf_market import ALFOrder
+from pipeline.core.alf_dex import ALFOrder
 
 
 ALG_REGISTRY = {}
@@ -39,6 +39,7 @@ class ALFAlgNode(abc.ABC):
 
     def get_alg_frame(self):
         return self.get_dict_from_children(lambda x: x.extractions)
+    
     def get_dict_from_children(self, property_getter):
         out = property_getter(self)
         for alg in self.alg_nodes:
