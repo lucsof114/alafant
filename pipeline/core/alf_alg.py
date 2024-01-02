@@ -29,7 +29,7 @@ class ALFAlgNode(abc.ABC):
 
     def set_extraction(self, name, value):
         node_name = f"{self.name}-{name}"
-        self.extractions[node_name] = copy.deepcopy(value)
+        self.extractions[node_name] = value
     
     def place_order(self, order):
         assert isinstance(order, ALFOrder), f"{order} is not an ALFOrder"
@@ -38,7 +38,8 @@ class ALFAlgNode(abc.ABC):
         return order.id
 
     def get_alg_frame(self):
-        return self.get_dict_from_children(lambda x: x.extractions)
+        out = self.get_dict_from_children(lambda x: x.extractions)
+        return copy.deepcopy(out)
     
     def get_dict_from_children(self, property_getter):
         out = property_getter(self)
@@ -51,7 +52,6 @@ class ALFAlgNode(abc.ABC):
             out = out | new_frame
         return out
 
-
     def get_orders(self):
         out = self.get_dict_from_children(lambda x: x.new_orders)
         self.new_orders = {}
@@ -63,5 +63,5 @@ class ALFAlgNode(abc.ABC):
     
 
 def init_alg_registry():
-    from ..models import SmartDCA
+    from ..models import SmartDCA, TestAlg
 

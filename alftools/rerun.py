@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import json
-from pipeline.core import CoinMarketCapComs, ALFOrder, ALFQuote
+from pipeline.main import run_one_frame
+from pipeline.core import CoinMarketCapComs, ALFOrder, ALFQuote, ALG_REGISTRY, init_alg_registry
 from pipeline.models import SmartDCA
+import numpy as np
 import uuid
 
 START_DATE = datetime.now(timezone.utc) - timedelta(days=10)
@@ -16,7 +18,7 @@ def aggregate_data(start_date, end_date):
     for date_dir in base_path.iterdir():
         dir_date = datetime.fromisoformat(date_dir.name)
         if start_date <= dir_date <= end_date:
-            market_frame = {}
+            market_frame = {"timestamp": date_dir.name}
             for id_dir in date_dir.iterdir():
                 json_path = id_dir / 'USD' / 'market_data.json'
                 with open(json_path, 'r', encoding='utf-8') as file:
@@ -28,7 +30,7 @@ def aggregate_data(start_date, end_date):
 
 class RerunDEX:
 
-    def __init__(self, latency=0):
+    def __init__(self, wallet, latency=0):
         self.latency = latency
         self.order_id_to_tx_id = {}
 
@@ -37,41 +39,47 @@ class RerunDEX:
             order.status = ALFOrder.PENDING
             self.order_id_to_tx_id[order.id] = str(uuid.uuid4())
 
-    def get_tx_ids(self, orders):
-        out = []
-        for order in orders:
-            tx_id = self.order_id_to_tx_id[order.id]
-            order.tx_id = tx_id
-            out.append(tx_id)
-        return out 
+    def update_orders(self, order_book):
+        pass
 
 class RerunWallet:
     def __init__(self, wallet_state):
-        self.wallet = wallet_state
+        self.balance = wallet_state
+        self.pending_orders = []
 
-    def update_order_book(self, tx_ids, order_book):
+    def update_wallet(self):
+        pass
+
+    def execute_orders(self, order_book):        
         for order in order_book.values():
             if order.status != ALFOrder.PENDING:
                 continue
             token_id = order.token_id
-            if token_id not in self.wallet:
-                self.wallet[token_id] = 0
+            if token_id not in self.balance:
+                self.balance[token_id] = 0
             currency_id = ID_MAP['USDC'] if order.is_buy else token_id
-            amount_in_wallet = self.wallet[currency_id]
-            if amount_in_wallet < order.amount:
+            amount_in_wallet = self.balance[currency_id] 
+            amount_in_order = order.amount_out if order.is_buy else order.amount_out / order.quote_price
+            order.tx_fee = 0.0000001
+            seconds_delay = max(0, np.random.normal(100, 5))
+            order.exec_timestamp = (datetime.fromisoformat(order.market_timestamp) + timedelta(seconds=seconds_delay)).isoformat()
+            if amount_in_wallet < amount_in_order:
                 order.status = ALFOrder.FAILED
+                continue
             elif order.is_buy:
-                self.wallet[ID_MAP['USDC']] -= order.amount
-                self.wallet[token_id] += order.amount / order.price
+                self.balance[ID_MAP['USDC']] -= order.amount_out
+                self.balance[token_id] += order.amount_out / order.quote_price
+                order.amount_in = self.balance[token_id]
                 order.status = ALFOrder.COMPLETED
             else:
-                self.wallet[ID_MAP['USDC']] += order.amount
-                self.wallet[token_id] -= order.amount / order.price
+                self.balance[ID_MAP['USDC']] += order.amount_out
+                self.balance[token_id] -= order.amount_out / order.quote_price
+                order.amount_in = order.amount_out
                 order.status = ALFOrder.COMPLETED
             
     def to_dict(self):
         import copy
-        return copy.deepcopy(self.wallet)
+        return copy.deepcopy(self.balance)
 
 
 ID_MAP = {
@@ -82,7 +90,7 @@ ID_MAP = {
 
 INIT_WALLET_STATE = {
     ID_MAP['USDC'] : 1000,
-    ID_MAP['SOL'] : 0,
+    ID_MAP['SOL'] : 10,
     ID_MAP['PYTH'] : 0,
 }
 
@@ -93,36 +101,34 @@ def save_recording(path, out_frames):
         shutil.rmtree(path)
     save_dir.mkdir() 
     for frame in out_frames:
-        ts = frame['market_frame'][0]['timestamp']
+        ts = frame['timestamp']
         with open(save_dir / f'{ts}.json', 'w') as fp:
             json.dump(frame, fp, indent=4)
 
 
 def main():
+    init_alg_registry()
     market_updates = aggregate_data(START_DATE, END_DATE)
     data_coms = CoinMarketCapComs()
-    dex_coms = RerunDEX()
     wallet_coms = RerunWallet(wallet_state=INIT_WALLET_STATE)
+    dex_coms = RerunDEX(wallet=wallet_coms)
     data_coms.register_by_sym_dict(ID_MAP)
     order_book = {}
-    algs = SmartDCA()
+    algs = ALG_REGISTRY['TestAlg']()
     out_frames = []
     for market_frame in market_updates:
-        tx_ids = dex_coms.get_tx_ids([o for o in order_book.values() if o.status == ALFOrder.PENDING])
-        wallet_coms.update_order_book(tx_ids, order_book)
-        algs.run(market_frame, order_book)
-        new_orders = algs.get_orders()
-        if len(new_orders) != 0:
-            print(new_orders)
-        dex_coms.execute_orders(new_orders)
-        order_book = order_book | new_orders
-        out_frames.append({
-            "alg_frame": algs.get_alg_frame(),
-            "order_book": [v.to_dict() for v in order_book.values()],
-            "market_frame": [v.to_dict() for v in market_frame.values()],
-            "wallet_frame": wallet_coms.to_dict(),
-        })
-
+        wallet_coms.execute_orders(order_book)
+        for quote in market_frame.values():
+            if not isinstance(quote, ALFQuote):
+                continue
+            seconds_delay = max(0, np.random.normal(150, 30))
+            quote.quote_timestamp = (datetime.fromisoformat(quote.quote_timestamp) - timedelta(seconds=seconds_delay)).isoformat()
+        out_frame, order_book = run_one_frame(dex_coms, wallet_coms, market_frame, order_book, algs)
+        for order in out_frame['order_book']:
+            if order['status'] == ALFOrder.PENDING:
+                order['status'] = ALFOrder.FAILED
+        out_frames.append(out_frame)
+                
     save_recording('/Users/lucassoffer/Documents/Develop/alafant/dataset/rerun', out_frames)
 
 if __name__ == "__main__":

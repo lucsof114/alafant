@@ -1,1 +1,1 @@
-from .smart_dca import SmartDCA 
+from .smart_dca import SmartDCA, TestAlg

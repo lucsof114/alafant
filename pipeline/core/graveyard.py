@@ -185,3 +185,29 @@
 # response = requests.get("https://pro-api.coinmarketcap.com/v2/cryptocurrency/info?id=16116",headers=HEADER)
 # tradeable_assets = json.loads(response.text)
 # print("wait")
+# import requests
+# ID_MAP = {
+#     'SOL': "So11111111111111111111111111111111111111112",
+#     'PYTH': 'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3',
+#     'USDC': 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+# }
+# tx_id = "3H5AcD7Wr6PvDCj4NJMdh5JjikMGx1sAFUk4SLKmWurCggZx9JXLpujPcD22P3wtjhkEtGCbnW2gxFJ8yer58At2"
+# # out = requests.get(f"http://localhost:3000/transaction_meta?txid={tx_id}")
+# ids = ','.join([v for v in ID_MAP.values()])
+# out = requests.get(f"http://localhost:3000/get_balance?ids={ids}")
+# # tx_data = json.loads(out.text)
+# print(out.text)
+
+class ALFWallet:
+
+    def __init__(self):
+        self.balances = {2: 'a', 4 : 'c'}
+
+    def to_dict(self):
+        return self.balances
+
+x = ALFWallet()
+y = x.to_dict()
+y[2] = 'r'
+
+print(x.to_dict())

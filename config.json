@@ -1,9 +1,9 @@
 
 {
     "MODE": "DEBUG",
-    "MARKET_UPDATE_RATE": 15, 
+    "MARKET_UPDATE_RATE": 30, 
     "DATA_AUTH_KEY": "5c4d437ff01d465d9f7197e22f5cf387",
-    "ALG": "SmartDCA",
+    "ALG": "TestAlg",
     "DEFAULT_SLIPPAGE": 50,
     "MARKET_API_KEY": "d7c58506-119d-4c23-a43c-bcfbb9a864da",
     "BASE_CURRENCY": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",

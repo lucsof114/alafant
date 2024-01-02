@@ -4,6 +4,8 @@ import { Wallet } from '@project-serum/anchor';
 import bs58 from 'bs58';
 import fs from 'fs';
 import express from 'express'
+import { get } from "http";
+// import { get } from "express/lib/response";
 
 // import { readJsonFile } from './readJsonFile.js'; // Adjust the path as necessary
 
@@ -35,10 +37,13 @@ let keypair = web3.Keypair.fromSecretKey(privateKeyBuffer);
 const connection = new web3.Connection(web3.clusterApiUrl("mainnet-beta"));
 const wallet = new Wallet(keypair);
 
-const tokenList = await (await fetch('https://token.jup.ag/strict')).json();
-const symbolMap = {};
-const tokenMap = {};
-const orderStatus = {};
+let tokenList = await (await fetch('https://token.jup.ag/strict')).json();
+let symbolMap = {};
+let tokenMap = {};
+let orderStatus = {};
+let token_ids = [];
+let balance = {};
+
 tokenList.forEach((token) => {
 	const { symbol, address } = token;
 	symbolMap[symbol] = address;
@@ -48,6 +53,8 @@ tokenList.forEach((token) => {
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+
 
 async function sendTransactionWithRetry(connection, transaction) {
     let attempts = 0;
@@ -72,6 +79,7 @@ async function sendTransactionWithRetry(connection, transaction) {
             // Wait for confirmation
             confirmation = await connection.confirmTransaction(signature, 'confirmed');
             if (confirmation.value.err === null) {
+				confirmation = await connection.confirmTransaction(signature, 'finalized');
                 console.log('Transaction confirmed:', signature);
 				return signature;
             }
@@ -89,11 +97,16 @@ async function sendTransactionWithRetry(connection, transaction) {
 async function executeSwap(order) {
 	const { inputTokenAddress, outputTokenAddress, swapAmount, slippageBps, orderID } = order;
 
-	orderStatus[orderID] = 'PENDING'
+	orderStatus[orderID] = {
+		"tx_id" : null,
+		"status" : 'PENDING',
+		"pre_trade_balance": balance,
+		"post_trade_balance": null
+	};
 
 	const inputToken = tokenMap[inputTokenAddress];
 	const outputMint = outputTokenAddress;
-	const amount = swapAmount * 10 ** inputToken.decimals;
+	const amount = Math.floor(swapAmount * 10 ** inputToken.decimals);
 	const quoteURL = `https://quote-api.jup.ag/v6/quote?inputMint=${inputToken.address}&outputMint=${outputMint}&amount=${amount}&slippageBps=${slippageBps}`;
 	let currentQuoteURL = quoteURL;
 	// Get a quote for the swap
@@ -124,12 +137,24 @@ async function executeSwap(order) {
 	// deserialize the transaction
 	const swapTransactionBuf = Buffer.from(swapTransaction, 'base64');
 	var transaction = web3.VersionedTransaction.deserialize(swapTransactionBuf);
-
 	let txid = await sendTransactionWithRetry(connection, transaction);
 	if (txid) {
-		orderStatus[orderID] = txid;
+		sleep(2000)
+		const post_trade_balance = await get_balance([inputTokenAddress, outputTokenAddress])
+		orderStatus[orderID] = {
+			"tx_id" : txid,
+			"status" : 'COMPLETE',
+			"pre_trade_balance": balance,
+			"post_trade_balance": post_trade_balance
+		};
+		balance = post_trade_balance;
 	} else {
-		orderStatus[orderID] = 'FAILED'
+		orderStatus[orderID] = {
+			"tx_id" : null,
+			"status" : 'FAILED',
+			"pre_trade_balance": balance,
+			"post_trade_balance": null
+		};
 	}
 }
 
@@ -142,36 +167,89 @@ app.get('/order_status', async (req, res) => {
 	}
 });
 
+app.get('/public_key', async (req, res) => {
+	res.send(wallet.publicKey);
+});
+
+app.get('/transaction_meta', async (req, res) => {
+    const txid = req.query.txid;
+	const transactionDetails = await connection.getTransaction(txid, {
+        commitment: 'finalized',
+        maxSupportedTransactionVersion: 0 
+    });
+	if (transactionDetails) {
+		// Extract the fee
+		transactionDetails['LAMPORTS_PER_SOL'] = web3.LAMPORTS_PER_SOL;
+		res.send(transactionDetails);
+	} else {
+		res.send("error");
+	}
+});
+
 app.get('/is_alive', async (req, res) => {
 	res.send("TRUE");
 });
 
-app.post('/get_balance', async (req, res) => {
-	const splTokenMints = req.body;
-    const balances = {};
+// async function waitForBlockFinalization(connection, blockNumber) {
+//     let finalized = false;
 
-    for (const mintAddress of splTokenMints) {
+//     while (!finalized) {
+//         try {
+//             const block = await connection.getBlock(blockNumber);
+//             finalized = block && block.blockHeight === blockNumber;
+//         } catch (error) {
+//             // Handle errors (e.g., block not found) and decide whether to retry
+//             console.error("Error fetching block: ", error);
+//         }
+
+//         if (!finalized) {
+//             console.log(`Waiting for block ${blockNumber} to be finalized...`);
+//             await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for 1 second before retrying
+//         }
+//     }
+
+// }
+
+async function get_balance() {
+	const balances = {};
+	
+	for (const mintAddress of token_ids) {
 		if (mintAddress == symbolMap['SOL']) {
 			const balanceInLamports = await connection.getBalance(wallet.publicKey);
 			const balanceInSOL = balanceInLamports / web3.LAMPORTS_PER_SOL;
 			balances[mintAddress] = balanceInSOL;
 			continue;
 		}
+	
+		const mintPublicKey = new web3.PublicKey(mintAddress);
+		const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+			wallet.publicKey,
+			{ mint: mintPublicKey }
+		);
+	
+		let totalBalance = 0;
+		for (const account of tokenAccounts.value) {
+			const balance = account.account.data.parsed.info.tokenAmount.uiAmount;
+			totalBalance += balance;
+		}
+		balances[mintAddress] = totalBalance;
+	}
+	return balances
+}
 
-        const mintPublicKey = new web3.PublicKey(mintAddress);
-        const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
-            wallet.publicKey,
-            { mint: mintPublicKey }
-        );
-
-        let totalBalance = 0;
-        for (const account of tokenAccounts.value) {
-            const balance = account.account.data.parsed.info.tokenAmount.uiAmount;
-            totalBalance += balance;
-        }
-        balances[mintAddress] = totalBalance;
-    }
-    res.send(balances);
+app.get('/get_balance', async (req, res) => {
+	res.send(balance);
+})
+app.post('/set_tokens', async (req, res) => { 
+	token_ids = req.body['token_ids'];
+	for (const token_id of token_ids) {
+		if (!tokenMap[token_id]) {
+			token_ids = null;
+			return res.status(400).send('Tokens not available for trade');
+		} 
+	}
+	balance = await get_balance();
+	res.send('all good')
 })
 
 app.post('/execute-swaps', async (req, res) => {
