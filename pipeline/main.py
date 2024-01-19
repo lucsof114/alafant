@@ -50,7 +50,6 @@ def run_one_frame(dex, wallet, market_frame, order_book, algs):
         }
     logger.info(f"Timestamp: {market_frame['timestamp']}")
     for order in new_orders.values(): 
-        order_type = "BUY" if order.is_buy else "SELL"
         if order.is_buy:
             logger.info(f"[NEW ORDER] -- BUY {order.token_id} : {order.amount_out} USDC @ {order.quote_price} USD per token")
         else:

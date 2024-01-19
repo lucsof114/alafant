@@ -14,7 +14,7 @@ class SmartDCA(ALFAlgNode, is_start_node=True):
 
     
     def run(self, market_frame, order_book):
-        if self.order_id is not None:
+        if self.order_i d is not None:
             order = order_book[self.order_id]
             if order.status == ALFOrder.COMPLETED:
                 return
